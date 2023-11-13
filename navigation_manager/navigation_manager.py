@@ -25,6 +25,7 @@ class WaypointSender(Node):
 
         self.id_publisher_ = self.create_publisher(Int32, '/navigation_manager/next_waypointID', 10)
         self.pose_publisher_ = self.create_publisher(PoseStamped, 'navigation_manager/waypoint_pose', 10)
+        self.state_publisher_ = self.create_publisher(Int32, '/navigation_manager/state', 10)
 
         self._action_client = ActionClient(self, NavigateToPose, action_server_name)
         self.waypoints_data = self.load_waypoints_from_csv(waypoints_filename)
@@ -40,6 +41,11 @@ class WaypointSender(Node):
         # gpsとmapのposeを提供してくれるノードに対して指示
         self.gps_pose_enable_publisher_ = self.create_publisher(Int32, '/navigation_manager/gps_pose_enable', 10)
         self.map_pose_enable_publisher_ = self.create_publisher(Int32, '/navigation_manager/map_pose_enable', 10)
+
+        int_msg = Int32(data=self.current_waypoint_index)
+        # ナビゲーション開始を伝える
+        self.status_msg = Int32()
+        self.pub_status(1)
         
         
     def load_waypoints_from_csv(self, filename):
@@ -77,8 +83,9 @@ class WaypointSender(Node):
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = waypoint_data["pose"]
         
-        while not self._action_client.wait_for_server(timeout_sec=1.0):
+        while not self._action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().warn('Action server not available, waiting...')
+            self.pub_status(5)
         
         self.get_logger().info('Sending waypoint...')
         send_goal_future = self._action_client.send_goal_async(goal_msg, feedback_callback=self.feedback_callback)
@@ -103,6 +110,11 @@ class WaypointSender(Node):
             initial_pose_msg.pose.covariance = self.odom_pose.pose.covariance  # 共分散情報もコピー
             self.initial_pose_publisher.publish(initial_pose_msg)
 
+    def pub_status(self, call_id):
+            self.status_msg.data = call_id
+            self.state_publisher_.publish(self.status_msg)
+
+
     def feedback_callback(self, feedback_msg):
         current_time = self.get_clock().now()
         if (current_time - self._last_feedback_time).nanoseconds >= 3e9:
@@ -124,22 +136,34 @@ class WaypointSender(Node):
         self.next_waypoint_data = self.waypoints_data[self.current_waypoint_index]
         current_stop_flag = self.next_waypoint_data["stop_flag"]
         current_skip_flag = self.next_waypoint_data["skip_flag"]
+        current_gps_flag  = self.next_waypoint_data["gps_pose_enable"]
+        current_map_flag  = self.next_waypoint_data["map_pose_enable"]
+
         self.get_logger().info('skip_flag: %s' % current_skip_flag)
         self.get_logger().info('status: %s' % status)
+
+        if current_stop_flag == 1 and current_stop_flag == 1:
+            self.pub_status(103)
+
+        if current_gps_flag == 0 and current_map_flag == 0:
+            self.pub_status(104)
         
         # SUCCEEDED または ABORTEDかつskip == 1かつstop==0のときに次のwaypointを目指す
-        if status == GoalStatus.STATUS_SUCCEEDED or \
-          (status == GoalStatus.STATUS_ABORTED and current_skip_flag == 1 and current_stop_flag == 0):
+        if status == GoalStatus.STATUS_SUCCEEDED: 
+            self.current_waypoint_index += 1
+        elif status == GoalStatus.STATUS_ABORTED and current_skip_flag == 1 and current_stop_flag == 0:
+            self.pub_status(101)
             self.current_waypoint_index += 1
         else:
             # 同じWaypointを目指し直す。インクリメントしないでセットするだけ。つまり何もしない。
-            pass
+            self.pub_status(102)
         
         if self.current_waypoint_index < len(self.waypoints_data):
             self.next_waypoint_data = self.waypoints_data[self.current_waypoint_index]
 
             # stop==1かつSUCCEEDEDのときに停止する。ABORTEDのときには止まらず次のWaypointを目指す。
             if current_stop_flag == 1 and status == GoalStatus.STATUS_SUCCEEDED:
+                self.pub_status(20)
                 self.get_logger().info('Press n key to resume navigation.')
                 threading.Thread(target=self.wait_for_user_input).start()
             else:
@@ -147,6 +171,8 @@ class WaypointSender(Node):
                 self.send_goal(self.next_waypoint_data)
         else:
             self.get_logger().info('Arrived at the last waypoint. Navigation complete.')
+            self.pub_status(10)
+
 
     def odom_callback(self, msg):
         self.odom_pose = msg
@@ -181,6 +207,8 @@ def main(args=None):
         rclpy.spin(waypoint_sender)
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, shutting down...")
+        waypoint_sender.pub_status(100)
+
     finally:
         waypoint_sender.destroy_node()
         rclpy.shutdown()
