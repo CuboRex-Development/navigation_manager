@@ -82,6 +82,8 @@ class WaypointSender(Node):
     def send_goal(self, waypoint_data):
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = waypoint_data["pose"]
+        # TEST WAIT
+        time.sleep(0.3)
         
         while not self._action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().warn('Action server not available, waiting...')
