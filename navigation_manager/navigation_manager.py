@@ -11,6 +11,7 @@ import threading
 from pynput import keyboard
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from nav2_msgs.srv import ClearEntireCostmap
 
 
 class WaypointSender(Node):
@@ -32,6 +33,12 @@ class WaypointSender(Node):
         self.current_waypoint_index = 0
         self._last_feedback_time = self.get_clock().now()
         
+        # サービスクライアントを追加
+        self.local_costmap_clear_client = self.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap')
+        self.global_costmap_clear_client = self.create_client(ClearEntireCostmap, '/global_costmap/clear_entirely_global_costmap')
+        while not self.local_costmap_clear_client.wait_for_service(timeout_sec=1.0) or not self.global_costmap_clear_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('サービスが利用可能になるまで待機中...')
+        
         # /odomからEKFのposeを取得
         self.odom_subscriber = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         # odomのポーズを保持する変数を初期化
@@ -47,7 +54,17 @@ class WaypointSender(Node):
         self.status_msg = Int32()
         self.pub_status(1)
         
-        
+    def clear_costmaps(self):
+        # ローカルコストマップをクリア
+        req = ClearEntireCostmap.Request()
+        self.local_costmap_clear_client.call_async(req)
+
+        # グローバルコストマップをクリア
+        req = ClearEntireCostmap.Request()
+        self.global_costmap_clear_client.call_async(req) 
+        self.pub_status(30)   
+    
+    
     def load_waypoints_from_csv(self, filename):
         waypoints_data = []
         with open(filename, mode='r') as file:
@@ -196,6 +213,7 @@ class WaypointSender(Node):
             listener.join()
 
         print("'n' key detected!")
+        self.clear_costmaps()# コストマップをクリアするサービスリクエストを送信
         self.next_waypoint_data["pose"].header.stamp = self.get_clock().now().to_msg()
         #self.send_goal(self.next_waypoint_data["pose"])
         self.send_goal(self.next_waypoint_data)
