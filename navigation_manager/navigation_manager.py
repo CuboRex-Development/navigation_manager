@@ -136,7 +136,7 @@ class WaypointSender(Node):
 
     def feedback_callback(self, feedback_msg):
         current_time = self.get_clock().now()
-        if (current_time - self._last_feedback_time).nanoseconds >= 3e9:
+        if (current_time - self._last_feedback_time).nanoseconds >= 1e9:
             self.get_logger().info('Received feedback: {0}'.format(feedback_msg.feedback.distance_remaining))
             self._last_feedback_time = current_time
 
@@ -177,6 +177,7 @@ class WaypointSender(Node):
                 # 正常ゴール判定
                 self.current_waypoint_index += 1
                 self.last_succeeded_time = self.get_clock().now()
+                # ここにゴールまでの距離を表示
             else:
                 # 同一フラグで重複ゴール達成判定が発生。indexをインクリメントしない
                 #self.current_waypoint_index += 1 # バグ発生用のテスト、これをコメントアウト
@@ -194,6 +195,7 @@ class WaypointSender(Node):
         
         if self.current_waypoint_index < len(self.waypoints_data):
             self.next_waypoint_data = self.waypoints_data[self.current_waypoint_index]
+            self.get_logger().info('つぎのwaypoint ID: %d' % self.current_waypoint_index)
 
             # stop==1かつSUCCEEDEDのときに停止する。ABORTEDのときには止まらず次のWaypointを目指す。
             if current_stop_flag == 1 and status == GoalStatus.STATUS_SUCCEEDED:
