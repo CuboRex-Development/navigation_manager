@@ -161,11 +161,14 @@ class WaypointSender(Node):
         self.get_logger().info('skip_flag: %s' % current_skip_flag)
         self.get_logger().info('status: %s' % status)
 
-        if current_stop_flag == 1 and current_stop_flag == 1:
+        if current_stop_flag == 1 and current_skip_flag == 1:
             self.pub_status(103)
 
         if current_gps_flag == 0 and current_map_flag == 0:
             self.pub_status(104)
+
+        if current_skip_flag == 0: # スキップ禁止区域は立ち往生しやすい
+            self.clear_costmaps()
         
         # SUCCEEDED または ABORTEDかつskip == 1かつstop==0のときに次のwaypointを目指す
         if status == GoalStatus.STATUS_SUCCEEDED: 
