@@ -32,6 +32,8 @@ class WaypointSender(Node):
         self.waypoints_data = self.load_waypoints_from_csv(waypoints_filename)
         self.current_waypoint_index = 0
         self._last_feedback_time = self.get_clock().now()
+
+        self.last_succeeded_time = self.get_clock().now()
         
         # サービスクライアントを追加
         self.local_costmap_clear_client = self.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap')
@@ -99,8 +101,6 @@ class WaypointSender(Node):
     def send_goal(self, waypoint_data):
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = waypoint_data["pose"]
-        # TEST WAIT
-        time.sleep(0.3)
         
         while not self._action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().warn('Action server not available, waiting...')
@@ -169,12 +169,24 @@ class WaypointSender(Node):
         
         # SUCCEEDED または ABORTEDかつskip == 1かつstop==0のときに次のwaypointを目指す
         if status == GoalStatus.STATUS_SUCCEEDED: 
-            self.current_waypoint_index += 1
+            self.get_logger().info(f'time:{((self.get_clock().now() - self.last_succeeded_time).nanoseconds)}')
+            if (self.get_clock().now() - self.last_succeeded_time).nanoseconds >= 1e9:
+                # 正常ゴール判定
+                self.current_waypoint_index += 1
+                self.last_succeeded_time = self.get_clock().now()
+            else:
+                # 同一フラグで重複ゴール達成判定が発生。indexをインクリメントしない
+                #self.current_waypoint_index += 1 # バグ発生用のテスト、これをコメントアウト
+                self.pub_status(105)
+
         elif status == GoalStatus.STATUS_ABORTED and current_skip_flag == 1 and current_stop_flag == 0:
+            self.clear_costmaps()# コストマップをクリアするサービスリクエストを送信
             self.pub_status(101)
             self.current_waypoint_index += 1
+
         else:
             # 同じWaypointを目指し直す。インクリメントしないでセットするだけ。つまり何もしない。
+            self.clear_costmaps()# コストマップをクリアするサービスリクエストを送信
             self.pub_status(102)
         
         if self.current_waypoint_index < len(self.waypoints_data):
